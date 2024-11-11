@@ -1,0 +1,115 @@
+buildscript {
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        maven { url "https://plugins.gradle.org/m2/" }
+        maven { url "https://nexus.bertramlabs.com/content/repositories/snapshots" }
+    }
+    dependencies {
+        classpath "com.github.johnrengelman:shadow:8.1.1"
+        classpath "com.morpheusdata:morpheus-plugin-gradle:$morpheusPluginGradleVersion"
+        classpath "com.bertramlabs.plugins:asset-pipeline-gradle:$assetPipelineVersion"
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'groovy'
+apply plugin: 'idea'
+apply plugin: 'com.github.johnrengelman.shadow'
+apply plugin: 'asset-pipeline'
+apply plugin: 'com.morpheusdata.morpheus-plugin-gradle'
+
+group = 'com.morpheusdata.datasets'
+ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
+
+java {
+    sourceCompatibility = JavaVersion.toVersion('1.11')
+    targetCompatibility = JavaVersion.toVersion('1.11')
+}
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+    maven { url "https://nexus.bertramlabs.com/content/repositories/snapshots" }
+}
+
+configurations {
+    provided
+}
+
+dependencies {
+    provided "com.morpheusdata:morpheus-plugin-api:$morpheusApiVersion"
+    provided "org.codehaus.groovy:groovy-all:$groovyVersion"
+    implementation "org.slf4j:slf4j-api:$slf4jVersion"
+    implementation "org.slf4j:slf4j-parent:$slf4jVersion"
+    implementation 'commons-net:commons-net:3.9.0'
+
+    testImplementation 'io.reactivex.rxjava3:rxjava:3.1.7'
+    testImplementation "org.slf4j:slf4j-parent:$slf4jVersion"
+    testImplementation "org.codehaus.groovy:groovy-all:$groovyVersion"
+    testImplementation 'net.bytebuddy:byte-buddy:1.9.3'
+    testImplementation 'org.objenesis:objenesis:2.6'
+    testImplementation platform("org.spockframework:spock-bom:$spockVersion")
+    testImplementation "org.spockframework:spock-core"
+    testImplementation "org.spockframework:spock-junit4"
+    testImplementation 'cglib:cglib-nodep:3.2.12'
+}
+
+sourceSets {
+    main {
+        compileClasspath += configurations.provided
+    }
+}
+
+jar {
+    manifest {
+        attributes(
+                'Plugin-Class': 'com.morpheusdata.uthman.CustomDatasetProviderPlugin',
+                'Plugin-Version': version,
+                'Morpheus-Name': 'Custom REST API Dataset Provider Plugin',
+                'Morpheus-Organization': 'morpheus',
+                'Morpheus-Code': 'uthman',
+                'Morpheus-Description': 'Retrieve data from a REST API based on only an endpoint as input',
+                'Morpheus-Logo': 'assets/morpheus.svg',
+                'Morpheus-Logo-Dark': 'assets/morpheus.svg',
+                'Morpheus-Labels': 'Plugin, Custom, REST, uthman',
+                'Morpheus-Repo': '',
+                'Morpheus-Min-Appliance-Version': "7.0.4"
+        )
+    }
+}
+
+assets {
+    packagePlugin = false //leave this false for plugins
+}
+
+task(console, dependsOn: 'classes', type: JavaExec) {
+    main = 'groovy.ui.Console'
+    classpath = sourceSets.main.compileClasspath + sourceSets.main.runtimeClasspath
+}
+
+test {
+    testLogging {
+        exceptionFormat = 'full'
+        showStandardStreams = true
+    }
+}
+
+tasks.assemble.dependsOn tasks.shadowJar
+
+task uploadJar(type: Exec) {
+    dependsOn tasks.shadowJar // Ensure the jar is built before uploading
+
+    def jarFilePath = "${this.getBuildDir()}/libs/custom-rest-api-dataset-provider-${version}-all.jar" // Adjust the jar file name if necessary
+    def applianceUrl = applianceHost.startsWith("http") ? applianceHost : "https://${applianceHost}"
+
+    commandLine 'curl', '--insecure', '--request', 'POST',
+            '--url', "$applianceUrl/api/plugins/upload",    // Replace with your appliance URL
+            '--header', 'accept: application/json',
+            '--header', "authorization: Bearer $apiToken",  // Replace with your API token
+            '--header', 'content-type: multipart/form-data',
+            '--form', "file=@${jarFilePath}",
+            '-vvvv'
+}
+
+build.finalizedBy(uploadJar)
